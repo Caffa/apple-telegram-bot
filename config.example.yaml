@@ -1,0 +1,47 @@
+# Configuration for Apple Notes Telegram Bot
+# Copy this file to config.yaml and customize
+
+# Required: Telegram bot token (get from @BotFather)
+bot_token: ""
+
+# Apple Note settings
+note:
+  # Name of the note to create (or "new" for new note per message group)
+  # When "new", each message group creates a new note
+  mode: new  # "new" or "append"
+  # Note title prefix (used with "new" mode)
+  title_prefix: "Telegram"
+
+# Message grouping timeouts (in seconds)
+timeouts:
+  text: 30
+  voice: 120
+  photo: 120
+
+# Voice transcription
+voice:
+  # Provider: "parakeet" (Apple Silicon) or "faster-whisper" (Intel/other)
+  # Auto-detects if not specified
+  provider: auto
+  # Parakeet model (only for Apple Silicon)
+  parakeet_model: "mlx-community/parakeet-tdt-0.6b-v3"
+  # Faster-Whisper model (only for Intel)
+  whisper_model: "base"
+
+# Paths (customize if needed)
+paths:
+  # Log file location
+  log_file: "~/Library/Logs/apple-notes-bot.log"
+  # Temp directory for downloads
+  temp_dir: "/tmp/apple-notes-bot"
+  # Parakeet installation path
+  parakeet_path: "~/Local-Projects-2026/speech-to-text-parakeet"
+
+# Health monitoring (for heartbeat menu)
+health:
+  # Restart bot every N hours (0 to disable)
+  periodic_restart_hours: 4
+  # Restart if no messages for N minutes (0 to disable)
+  no_message_timeout_minutes: 30
+  # Check interval in seconds
+  check_interval_seconds: 10

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
 Apple Notes Telegram Bot
-Receives text, voice messages, and images from Telegram and creates new Apple Notes for each message group.
-Uses parakeet-mlx for voice transcription.
+Receives text, voice messages, and images from Telegram and creates Apple Notes.
+Uses parakeet-mlx (Apple Silicon) or faster-whisper (Intel) for voice transcription.
 
 Setup:
-    1. Create a Telegram bot via @BotFather and get the token
-    2. Set TELEGRAM_APPLE_NOTES_BOT=<token> environment variable
-    3. Run: python apple_notes_bot.py
+    1. Copy config.example.yaml to config.yaml
+    2. Add your bot token to config.yaml or set TELEGRAM_APPLE_NOTES_BOT env var
+    3. Run: python3 apple_notes_bot.py
 """
 
 import asyncio
@@ -21,27 +21,31 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# Telegram imports
-from telegram import Update, ReactionTypeEmoji
-from telegram.ext import Application, CallbackContext, MessageHandler, filters
+# Add current directory to path for config module
+sys.path.insert(0, str(Path(__file__).parent))
 
-# Configuration
-BOT_TOKEN = os.environ.get("TELEGRAM_APPLE_NOTES_BOT", "")
+from config import (
+    load_config,
+    detect_transcription_provider,
+    get_log_file,
+    get_temp_dir,
+    get_timeout,
+)
 
-# Paths
-PARAKEET_MODEL = os.environ.get("PARAKEET_MODEL", "mlx-community/parakeet-tdt-0.6b-v3")
-LOG_FILE = Path("/Users/caffae/Local-Projects-2026/Cerulean-Logs/apple-notes-bot.log")
-TEMP_DIR = Path("/tmp/apple-notes-bot")
+# Load configuration
+CONFIG = load_config()
+
+# Resolve paths
+LOG_FILE = get_log_file(CONFIG)
+TEMP_DIR = get_temp_dir(CONFIG)
 
 # Ensure directories exist
 for d in [LOG_FILE.parent, TEMP_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
-
-# Parakeet path
-PARAKEET_PATH = Path("/Users/caffae/Local-Projects-2026/speech-to-text-parakeet")
-if PARAKEET_PATH.exists():
-    sys.path.insert(0, str(PARAKEET_PATH))
+# Telegram imports
+from telegram import Update, ReactionTypeEmoji
+from telegram.ext import Application, CallbackContext, MessageHandler, filters
 
 
 def log(msg: str):
@@ -54,42 +58,83 @@ def log(msg: str):
 
 
 # ==============================================================================
-# PARAKEET TRANSCRIPTION
+# VOICE TRANSCRIPTION (parakeet or faster-whisper)
 # ==============================================================================
 
 
 def transcribe_with_parakeet(audio_path: Path) -> str:
-    """
-    Transcribe audio file using parakeet-mlx.
-    """
+    """Transcribe audio using parakeet-mlx (Apple Silicon)."""
+    parakeet_path = Path(CONFIG["paths"]["parakeet_path"])
+    
+    if not parakeet_path.exists():
+        raise RuntimeError(f"Parakeet not found at: {parakeet_path}")
+    
+    # Add to path
+    if str(parakeet_path) not in sys.path:
+        sys.path.insert(0, str(parakeet_path))
+    
+    from parakeet_mlx import from_pretrained
+    from asr_helper import preprocess_audio, mechanical_cleanup
+    
+    model_name = CONFIG["voice"]["parakeet_model"]
+    log(f"Loading parakeet model: {model_name}")
+    model = from_pretrained(model_name)
+    
+    log(f"Preprocessing audio: {audio_path.name}")
+    wav_path = preprocess_audio(audio_path)
+    
+    if wav_path is None:
+        raise RuntimeError("Audio preprocessing failed")
+    
     try:
-        from parakeet_mlx import from_pretrained
-        from asr_helper import preprocess_audio, mechanical_cleanup
+        log(f"Transcribing: {wav_path.name}")
+        result = model.transcribe(str(wav_path))
+        text = result.text.strip()
+        text = mechanical_cleanup(text)
+        log(f"Parakeet transcription: {text[:100]}...")
+        return text
+    finally:
+        if wav_path and wav_path.exists():
+            wav_path.unlink()
+
+
+def transcribe_with_whisper(audio_path: Path) -> str:
+    """Transcribe audio using faster-whisper (Intel/any system)."""
+    try:
+        from faster_whisper import WhisperModel
         
-        log(f"Loading parakeet model: {PARAKEET_MODEL}")
-        model = from_pretrained(PARAKEET_MODEL)
+        model_name = CONFIG["voice"]["whisper_model"]
+        log(f"Loading faster-whisper model: {model_name}")
         
-        # Preprocess audio
-        log(f"Preprocessing audio: {audio_path.name}")
-        wav_path = preprocess_audio(audio_path)
+        # Use CPU with int8 for best compatibility
+        model = WhisperModel(model_name, device="cpu", compute_type="int8")
         
-        if wav_path is None:
-            raise RuntimeError("Audio preprocessing failed")
+        log(f"Transcribing: {audio_path.name}")
+        segments, info = model.transcribe(str(audio_path), beam_size=5)
         
-        try:
-            log(f"Transcribing: {wav_path.name}")
-            result = model.transcribe(str(wav_path))
-            text = result.text.strip()
-            text = mechanical_cleanup(text)
-            log(f"Transcription complete: {text[:100]}...")
-            return text
-        finally:
-            if wav_path and wav_path.exists():
-                wav_path.unlink()
-                
-    except Exception as e:
-        log(f"Transcription error: {e}")
-        raise
+        # Collect all segments
+        text_parts = []
+        for segment in segments:
+            text_parts.append(segment.text.strip())
+        
+        text = " ".join(text_parts)
+        log(f"Whisper transcription: {text[:100]}...")
+        return text
+        
+    except ImportError:
+        raise RuntimeError("faster-whisper not installed. Run: pip install faster-whisper")
+
+
+def transcribe_audio(audio_path: Path) -> str:
+    """Transcribe audio using the appropriate provider."""
+    provider = detect_transcription_provider(CONFIG)
+    
+    log(f"Using transcription provider: {provider}")
+    
+    if provider == "parakeet":
+        return transcribe_with_parakeet(audio_path)
+    else:
+        return transcribe_with_whisper(audio_path)
 
 
 # ==============================================================================
@@ -98,16 +143,7 @@ def transcribe_with_parakeet(audio_path: Path) -> str:
 
 
 def create_apple_note(title: str, content: str) -> bool:
-    """
-    Create a new Apple Note with title and content.
-    
-    Args:
-        title: Note title
-        content: Note body content
-    
-    Returns:
-        True if successful
-    """
+    """Create a new Apple Note."""
     escaped_title = title.replace("\\", "\\\\").replace('"', '\\"')
     escaped_content = content.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
     
@@ -139,16 +175,56 @@ def create_apple_note(title: str, content: str) -> bool:
         return False
 
 
+def append_to_apple_note(note_name: str, content: str) -> bool:
+    """Append content to an existing Apple Note."""
+    escaped_note_name = note_name.replace("\\", "\\\\").replace('"', '\\"')
+    escaped_content = content.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    
+    apple_script = f'''
+    tell application "Notes"
+        set noteName to "{escaped_note_name}"
+        set foundNote to missing value
+        repeat with n in every note
+            if name of n is equal to noteName then
+                set foundNote to n
+                exit repeat
+            end if
+        end repeat
+        if foundNote is missing value then
+            tell account "iCloud"
+                make new note at folder "Notes" with properties {{name:noteName, body:""}}
+                set foundNote to first note whose name is noteName
+            end tell
+        end if
+        tell foundNote
+            set theText to body
+            set body to theText & "{escaped_content}" & linefeed & linefeed
+        end tell
+    end tell
+    '''
+    
+    try:
+        result = subprocess.run(
+            ["osascript", "-e", apple_script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            log(f"AppleScript error: {result.stderr}")
+            return False
+        
+        log(f"Appended to Apple Note: '{note_name}'")
+        return True
+        
+    except Exception as e:
+        log(f"Failed to append to Apple Note: {e}")
+        return False
+
+
 def copy_image_to_notes_attachments(image_path: Path) -> Optional[Path]:
-    """
-    Copy an image to the Notes attachments folder so it appears in the note.
-    
-    Args:
-        image_path: Path to image file
-    
-    Returns:
-        Path to the copied image, or None if failed
-    """
+    """Copy image to Notes attachments folder."""
     try:
         notes_attachments = Path.home() / "Library/Group Containers/group.com.apple.notes/Attachments"
         notes_attachments.mkdir(parents=True, exist_ok=True)
@@ -166,14 +242,13 @@ def copy_image_to_notes_attachments(image_path: Path) -> Optional[Path]:
 
 
 # ==============================================================================
-# MESSAGE BUFFERING (from original bot)
+# MESSAGE BUFFERING
 # ==============================================================================
 
 
 @dataclass
 class BufferedMessage:
-    """Represents a single buffered message."""
-    message_type: str  # "text", "photo", "voice"
+    message_type: str
     timestamp: str
     content: str
     temp_file_path: Optional[Path] = None
@@ -182,7 +257,6 @@ class BufferedMessage:
 
 @dataclass
 class UserBuffer:
-    """Buffer for a single user's messages."""
     user_id: int
     first_timestamp: str
     messages: list[BufferedMessage] = field(default_factory=list)
@@ -191,12 +265,8 @@ class UserBuffer:
 
 
 class MessageBuffer:
-    """Manages time-based message grouping buffers."""
-    
     def __init__(self):
         self.buffers: dict[int, UserBuffer] = {}
-        self.default_timeout = 30  # seconds
-        self.voice_timeout = 120  # seconds (2 minutes)
 
     def add_message(
         self,
@@ -207,7 +277,6 @@ class MessageBuffer:
         temp_file_path: Optional[Path] = None,
         caption: Optional[str] = None,
     ) -> UserBuffer:
-        """Add message to buffer, creating new buffer if needed."""
         msg = BufferedMessage(
             message_type=message_type,
             timestamp=timestamp,
@@ -232,14 +301,15 @@ class MessageBuffer:
         return self.buffers[user_id]
 
     def get_timeout(self, buffer: UserBuffer) -> int:
-        return self.voice_timeout if buffer.contains_voice else self.default_timeout
+        if buffer.contains_voice:
+            return get_timeout(CONFIG, "voice")
+        return get_timeout(CONFIG, "text")
 
     def check_timeout(self, buffer: UserBuffer) -> bool:
         first_dt = datetime.strptime(buffer.first_timestamp, "%Y-%m-%d %H:%M:%S")
         current_dt = datetime.now()
         elapsed = (current_dt - first_dt).total_seconds()
-        timeout = self.get_timeout(buffer)
-        return elapsed >= timeout
+        return elapsed >= self.get_timeout(buffer)
 
     def get_messages(self, user_id: int) -> Optional[UserBuffer]:
         return self.buffers.get(user_id)
@@ -252,24 +322,12 @@ class MessageBuffer:
             del self.buffers[user_id]
 
 
-# Global buffer instance
 message_buffer = MessageBuffer()
 
 
 # ==============================================================================
-# HEARTBEAT MENU (from original bot)
+# REACTIONS (Heartbeat Menu)
 # ==============================================================================
-
-
-def build_heartbeat_menu(user_name: str, note_title: str, content_preview: str) -> list:
-    """
-    Build inline keyboard with actions for the note.
-    
-    Returns list of button rows for telegram bot menu.
-    """
-    # For Apple Notes, we mainly show the note was created
-    # The menu shows options for what was done
-    return []
 
 
 async def add_reaction(update: Update, context: CallbackContext, emoji: str = "❤️"):
@@ -299,7 +357,6 @@ async def process_buffered_messages(
     user_name = update.effective_user.first_name or "Unknown"
     
     try:
-        # Collect content from all messages
         text_parts = []
         image_paths = []
         
@@ -311,11 +368,9 @@ async def process_buffered_messages(
                 
             elif msg.message_type == "photo":
                 if msg.temp_file_path:
-                    # Copy image to Notes attachments
                     dest_path = copy_image_to_notes_attachments(msg.temp_file_path)
                     if dest_path:
                         image_paths.append(dest_path)
-                    # Clean up temp
                     if msg.temp_file_path.exists():
                         msg.temp_file_path.unlink()
                 if msg.caption:
@@ -324,52 +379,51 @@ async def process_buffered_messages(
             elif msg.message_type == "voice":
                 if msg.temp_file_path:
                     try:
-                        log(f"Process: Transcribing voice from {msg.temp_file_path}")
-                        transcript = transcribe_with_parakeet(msg.temp_file_path)
+                        transcript = transcribe_audio(msg.temp_file_path)
                         if transcript:
                             text_parts.append(f"[Voice]: {transcript}")
                     except Exception as e:
                         log(f"Process: Voice transcription failed: {e}")
                         text_parts.append(f"[Voice]: (transcription failed)")
                     finally:
-                        # Clean up temp audio
                         if msg.temp_file_path.exists():
                             msg.temp_file_path.unlink()
 
         # Build note content
         timestamp = buffer.first_timestamp
         content_lines = []
-        
-        # Add header
         content_lines.append(f"=== {timestamp} ===")
         content_lines.append("")
         
-        # Add text content
         if text_parts:
             content_lines.extend(text_parts)
             content_lines.append("")
         
-        # Add image references
         for img_path in image_paths:
             content_lines.append(f"[Image attached: {img_path.name}]")
         
         note_content = "\n".join(content_lines)
         
-        # Create note title from timestamp
-        dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
-        note_title = f"Telegram - {dt.strftime('%Y-%m-%d %H:%M')}"
+        # Determine note mode
+        note_mode = CONFIG.get("note", {}).get("mode", "new")
         
-        # Create the Apple Note
-        success = create_apple_note(note_title, note_content)
+        if note_mode == "new":
+            # Create new note with timestamp title
+            dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
+            title_prefix = CONFIG.get("note", {}).get("title_prefix", "Telegram")
+            note_title = f"{title_prefix} - {dt.strftime('%Y-%m-%d %H:%M')}"
+            success = create_apple_note(note_title, note_content)
+        else:
+            # Append to existing note
+            note_title = CONFIG.get("note", {}).get("name", "Telegram Bot")
+            success = append_to_apple_note(note_title, note_content)
         
         if success:
-            log(f"Created note for {user_name}: {note_title}")
+            log(f"Created/appended note for {user_name}: {note_title}")
             
-            # Format reply
             preview = note_content[:100].replace("\n", " ")
-            reply_text = f"✅ Created note: {note_title}\n\n{preview}..."
+            reply_text = f"✅ Note: {note_title}\n\n{preview}..."
             
-            # Send reply
             try:
                 await update.message.reply_text(
                     reply_text,
@@ -429,13 +483,11 @@ async def buffer_timer_handler(user_id: int, update: Update, context: CallbackCo
 
 
 async def on_text(update: Update, context: CallbackContext):
-    """Handle text messages."""
     user_id = update.effective_user.id
     user = update.effective_user.first_name or "Unknown"
     text = update.message.text
     received_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Determine emoji
     existing_buffer = message_buffer.get_messages(user_id)
     is_initial = existing_buffer is None or len(existing_buffer.messages) == 0
     emoji = "❤️" if is_initial else "👍"
@@ -468,7 +520,6 @@ async def on_text(update: Update, context: CallbackContext):
 
 
 async def on_voice(update: Update, context: CallbackContext):
-    """Handle voice messages."""
     user_id = update.effective_user.id
     user = update.effective_user.first_name or "Unknown"
     voice = update.message.voice
@@ -477,7 +528,6 @@ async def on_voice(update: Update, context: CallbackContext):
     temp_ogg = TEMP_DIR / f"voice_{uuid.uuid4()}.ogg"
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Determine emoji
     existing_buffer = message_buffer.get_messages(user_id)
     is_initial = existing_buffer is None or len(existing_buffer.messages) == 0
     emoji = "❤️" if is_initial else "👍"
@@ -514,7 +564,6 @@ async def on_voice(update: Update, context: CallbackContext):
 
 
 async def on_audio(update: Update, context: CallbackContext):
-    """Handle audio files."""
     user_id = update.effective_user.id
     user = update.effective_user.first_name or "Unknown"
     audio = update.message.audio
@@ -523,7 +572,6 @@ async def on_audio(update: Update, context: CallbackContext):
     temp_audio = TEMP_DIR / f"audio_{uuid.uuid4()}.m4a"
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Determine emoji
     existing_buffer = message_buffer.get_messages(user_id)
     is_initial = existing_buffer is None or len(existing_buffer.messages) == 0
     emoji = "❤️" if is_initial else "👍"
@@ -539,7 +587,7 @@ async def on_audio(update: Update, context: CallbackContext):
 
         buffer = message_buffer.add_message(
             user_id=user_id,
-            message_type="voice",  # Treat as voice
+            message_type="voice",
             content="",
             timestamp=received_at,
             temp_file_path=temp_audio,
@@ -560,7 +608,6 @@ async def on_audio(update: Update, context: CallbackContext):
 
 
 async def on_photo(update: Update, context: CallbackContext):
-    """Handle photo messages."""
     user_id = update.effective_user.id
     user = update.effective_user.first_name or "Unknown"
     received_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -571,7 +618,6 @@ async def on_photo(update: Update, context: CallbackContext):
     temp_photo = TEMP_DIR / f"photo_{uuid.uuid4()}.jpg"
     TEMP_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Determine emoji
     existing_buffer = message_buffer.get_messages(user_id)
     is_initial = existing_buffer is None or len(existing_buffer.messages) == 0
     emoji = "❤️" if is_initial else "👍"
@@ -614,16 +660,19 @@ async def on_photo(update: Update, context: CallbackContext):
 
 
 def main():
-    if not BOT_TOKEN:
-        print("ERROR: TELEGRAM_APPLE_NOTES_BOT not set", file=sys.stderr)
-        print("Get a bot token from @BotFather and set:", file=sys.stderr)
-        print("  export TELEGRAM_APPLE_NOTES_BOT=your_token_here", file=sys.stderr)
+    bot_token = CONFIG.get("bot_token", "")
+    
+    if not bot_token:
+        print("ERROR: Bot token not set!", file=sys.stderr)
+        print("Set bot_token in config.yaml or TELEGRAM_APPLE_NOTES_BOT env var", file=sys.stderr)
         sys.exit(1)
     
+    provider = detect_transcription_provider(CONFIG)
     log("Apple Notes Bot starting...")
-    log(f"Parakeet model: {PARAKEET_MODEL}")
+    log(f"Transcription provider: {provider}")
+    log(f"Log file: {LOG_FILE}")
     
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = Application.builder().token(bot_token).build()
     
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, on_text))
     app.add_handler(MessageHandler(filters.VOICE, on_voice))

@@ -1,5 +1,4 @@
-# Apple Notes Telegram Bot
-# Requirements for parakeet transcription and Telegram bot
+# Apple Notes Telegram Bot - Requirements
 
 # Telegram bot
 python-telegram-bot>=20.0
@@ -7,9 +6,17 @@ python-telegram-bot>=20.0
 # Audio processing
 numpy
 soundfile
+ffmpeg  # System dependency: brew install ffmpeg
 
-# Parakeet MLX for local transcription
-parakeet-mlx
+# Voice transcription (one of these)
+parakeet-mlx  # Apple Silicon (M1/M2/M3/M4)
+faster-whisper  # Intel/any system (fallback)
 
-# Optional: send2trash for safer file deletion
+# Configuration
+PyYAML
+
+# macOS menu bar
+rumps
+
+# Optional
 send2trash
