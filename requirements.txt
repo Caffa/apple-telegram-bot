@@ -1,0 +1,15 @@
+# Apple Notes Telegram Bot
+# Requirements for parakeet transcription and Telegram bot
+
+# Telegram bot
+python-telegram-bot>=20.0
+
+# Audio processing
+numpy
+soundfile
+
+# Parakeet MLX for local transcription
+parakeet-mlx
+
+# Optional: send2trash for safer file deletion
+send2trash
