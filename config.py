@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Configuration loader for Apple Notes Telegram Bot.
-Loads config from YAML file with environment variable overrides.
+Loads config from .env, YAML file with environment variable overrides.
 """
 
 import os
@@ -10,6 +10,28 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+
+
+def load_env_file():
+    """Load .env file if it exists."""
+    script_dir = Path(__file__).parent
+    env_path = script_dir / ".env"
+    
+    if not env_path.exists():
+        return
+    
+    # Try to load python-dotenv if available, otherwise parse manually
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(env_path)
+    except ImportError:
+        # Manual parse
+        with open(env_path) as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    os.environ[key.strip()] = value.strip()
 
 
 def get_config_path() -> Path:
@@ -24,7 +46,10 @@ def get_config_path() -> Path:
 
 
 def load_config() -> dict[str, Any]:
-    """Load configuration from YAML file with env overrides."""
+    """Load configuration from .env, YAML file with env overrides."""
+    # Load .env file first
+    load_env_file()
+    
     config_path = get_config_path()
     
     # Load YAML if exists, otherwise use defaults

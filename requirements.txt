@@ -6,14 +6,15 @@ python-telegram-bot>=20.0
 # HTTP requests (for Ollama API)
 requests
 
+# Environment variables (.env file support)
+python-dotenv
+
 # Audio processing
 numpy
 soundfile
-ffmpeg  # System dependency: brew install ffmpeg
 
-# Voice transcription (one of these)
-parakeet-mlx  # Apple Silicon (M1/M2/M3/M4)
-faster-whisper  # Intel/any system (fallback)
+# Voice transcription
+faster-whisper  # Works on all systems (Intel, Apple Silicon, Linux)
 
 # Configuration
 PyYAML
@@ -21,5 +22,5 @@ PyYAML
 # macOS menu bar
 rumps
 
-# Optional
-send2trash
+# Optional: for safer file deletion
+# send2trash

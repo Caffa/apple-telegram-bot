@@ -8,23 +8,35 @@ You're setting up the **Apple Notes Telegram Bot**. Follow these steps:
 2. Send `/newbot` to create a new bot
 3. Follow the instructions and get your **bot token**
 
-## 2. Set Up Configuration
+## 2. Quick Setup (Single Command)
 
-Copy the example config and add your bot token:
+```bash
+cd apple-telegram-bot
 
+# Run the setup script - it will guide you
+./run.sh
+```
+
+The script will:
+- Create config.yaml or .env with your bot token
+- Install dependencies
+- Launch the bot
+
+### Manual Setup (if needed)
+
+If you prefer manual setup:
+
+**A. Using .env file:**
+```bash
+cp .env.example .env
+# Edit .env and add your bot token:
+# TELEGRAM_APPLE_NOTES_BOT=your_token_here
+```
+
+**B. Using config.yaml:**
 ```bash
 cp config.example.yaml config.yaml
-```
-
-Edit `config.yaml` and set your bot token:
-
-```yaml
-bot_token: "your_bot_token_here"
-```
-
-Or set via environment variable:
-```bash
-export TELEGRAM_APPLE_NOTES_BOT="your_bot_token_here"
+# Edit config.yaml and add your bot token
 ```
 
 ## 3. Install Dependencies
@@ -33,72 +45,57 @@ export TELEGRAM_APPLE_NOTES_BOT="your_bot_token_here"
 pip install -r requirements.txt
 ```
 
-**Note:** Voice transcription requires either:
-- **Apple Silicon (M1/M2/M3/M4)**: Uses parakeet-mlx (no extra setup)
-- **Intel Mac or Linux**: Uses faster-whisper (installs automatically)
-
-ffmpeg is required for audio processing:
-```bash
-brew install ffmpeg
-```
-
 ## 4. Run the Bot
 
-**Option A: Direct**
 ```bash
+# Option 1: Quick start (recommended)
+./run.sh
+
+# Option 2: With heartbeat menu (macOS menubar)
+python3 heartbeat_menu.py
+
+# Option 3: Direct
 python3 apple_notes_bot.py
 ```
 
-**Option B: With Heartbeat Menu (recommended)**
-```bash
-python3 heartbeat_menu.py
-```
-
-The heartbeat menu runs in the macOS menubar and auto-restarts the bot if it crashes.
-
 ## 5. Test
 
-1. Open Telegram and find your bot
+1. Find your bot on Telegram
 2. Send a text message
 3. Wait 30 seconds
-4. Check Apple Notes - you should see a new note!
+4. Check Apple Notes - you should see a new note with an AI-generated title!
 
-## Configuration Options
+## Voice Transcription
 
-Edit `config.yaml` to customize:
+- **Apple Silicon (M1/M2/M3/M4)**: Uses parakeet-mlx (included)
+- **Intel Mac or Linux**: Uses faster-whisper (installed automatically)
 
-```yaml
-# Bot token (required)
-bot_token: ""
-
-# Note mode: "new" (one per message group) or "append" (single note)
-note:
-  mode: new
-  title_prefix: "Telegram"
-
-# Timeouts (seconds)
-timeouts:
-  text: 30
-  voice: 120
-
-# Voice transcription
-voice:
-  provider: auto  # "auto", "parakeet", or "faster-whisper"
-  parakeet_model: "mlx-community/parakeet-tdt-0.6b-v3"
-  whisper_model: "base"
-```
+No special setup needed - it auto-detects your hardware.
 
 ## Troubleshooting
 
 ### Bot not responding?
-- Check that `bot_token` in `config.yaml` is correct
-- Check logs at `~/Library/Logs/apple-notes-bot.log`
+- Check that bot token is set in .env or config.yaml
+- Check logs at ~/Library/Logs/apple-notes-bot.log
 
-### Transcription fails?
-- **Apple Silicon**: Ensure parakeet-mlx is installed
-- **Intel/Linux**: Ensure faster-whisper is installed: `pip install faster-whisper`
-- Check ffmpeg: `brew install ffmpeg`
+### Voice transcription fails?
+- Ensure ffmpeg is installed: `brew install ffmpeg`
 
 ### Notes not appearing?
 - Ensure iCloud Notes is enabled
 - Check Notes app permissions
+
+## Configuration
+
+Edit config.yaml to customize:
+
+```yaml
+note:
+  ai_title: true           # AI-generated titles
+  ai_title_model: "gemma3:4b"
+  mode: new               # "new" = new note per message
+
+voice:
+  provider: auto          # auto-detect (parakeet/whisper)
+  whisper_model: "base"
+```

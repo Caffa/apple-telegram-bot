@@ -185,9 +185,23 @@ def transcribe_audio(audio_path: Path) -> str:
     log(f"Using transcription provider: {provider}")
     
     if provider == "parakeet":
-        return transcribe_with_parakeet(audio_path)
-    else:
+        # Check if parakeet path exists before trying
+        parakeet_path = Path(CONFIG["paths"]["parakeet_path"])
+        if not parakeet_path.exists():
+            log(f"Parakeet not found at {parakeet_path}, falling back to faster-whisper")
+            provider = "faster-whisper"
+        else:
+            try:
+                return transcribe_with_parakeet(audio_path)
+            except Exception as e:
+                log(f"Parakeet failed: {e}, falling back to faster-whisper")
+                provider = "faster-whisper"
+    
+    if provider == "faster-whisper":
         return transcribe_with_whisper(audio_path)
+    
+    # Final fallback
+    return transcribe_with_whisper(audio_path)
 
 
 # ==============================================================================
