@@ -58,6 +58,59 @@ def log(msg: str):
 
 
 # ==============================================================================
+# AI TITLE GENERATION
+# ==============================================================================
+
+
+def generate_ai_title(content: str) -> str:
+    """Generate a title for the note using Ollama."""
+    from config import get_note_ai_title, get_note_ai_title_model
+    
+    if not get_note_ai_title(CONFIG):
+        return None
+    
+    model = get_note_ai_title_model(CONFIG)
+    
+    prompt = f"""Generate a short, descriptive title (max 50 characters) for this note content. 
+Just return the title, nothing else.
+
+Content:
+{content[:500]}
+"""
+
+    try:
+        import requests
+        
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "text",
+            },
+            timeout=30,
+        )
+        
+        if response.status_code == 200:
+            title = response.json().get("response", "").strip()
+            # Clean up title
+            title = title.strip('"').strip("'").strip()
+            # Limit length
+            if len(title) > 50:
+                title = title[:47] + "..."
+            log(f"AI generated title: {title}")
+            return title
+        else:
+            log(f"AI title generation failed: {response.status_code}")
+            return None
+            
+    except Exception as e:
+        log(f"AI title generation error: {e}")
+        return None
+
+
+# ==============================================================================
 # VOICE TRANSCRIPTION (parakeet or faster-whisper)
 # ==============================================================================
 
@@ -408,10 +461,17 @@ async def process_buffered_messages(
         note_mode = CONFIG.get("note", {}).get("mode", "new")
         
         if note_mode == "new":
-            # Create new note with timestamp title
+            # Generate AI title or use timestamp
             dt = datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S")
             title_prefix = CONFIG.get("note", {}).get("title_prefix", "Telegram")
-            note_title = f"{title_prefix} - {dt.strftime('%Y-%m-%d %H:%M')}"
+            
+            # Try AI title first
+            ai_title = generate_ai_title(note_content)
+            if ai_title:
+                note_title = ai_title
+            else:
+                note_title = f"{title_prefix} - {dt.strftime('%Y-%m-%d %H:%M')}"
+            
             success = create_apple_note(note_title, note_content)
         else:
             # Append to existing note

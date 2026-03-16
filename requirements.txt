@@ -3,6 +3,9 @@
 # Telegram bot
 python-telegram-bot>=20.0
 
+# HTTP requests (for Ollama API)
+requests
+
 # Audio processing
 numpy
 soundfile

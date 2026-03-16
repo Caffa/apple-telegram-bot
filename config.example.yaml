@@ -9,8 +9,12 @@ note:
   # Name of the note to create (or "new" for new note per message group)
   # When "new", each message group creates a new note
   mode: new  # "new" or "append"
-  # Note title prefix (used with "new" mode)
+  # Note title prefix (used with "new" mode and when AI title is disabled)
   title_prefix: "Telegram"
+  # Generate AI title using Ollama (requires ollama running)
+  ai_title: true
+  # Ollama model for title generation
+  ai_title_model: "gemma3:4b"
 
 # Message grouping timeouts (in seconds)
 timeouts:

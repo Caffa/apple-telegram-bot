@@ -62,6 +62,8 @@ def apply_defaults(config: dict[str, Any]) -> dict[str, Any]:
     config.setdefault("note", {})
     config["note"].setdefault("mode", "new")
     config["note"].setdefault("title_prefix", "Telegram")
+    config["note"].setdefault("ai_title", True)  # Generate AI title using Ollama
+    config["note"].setdefault("ai_title_model", "gemma3:4b")
     
     # Timeouts
     config.setdefault("timeouts", {})
@@ -125,3 +127,13 @@ def get_temp_dir(config: dict[str, Any]) -> Path:
 def get_timeout(config: dict[str, Any], message_type: str) -> int:
     """Get timeout for message type."""
     return config["timeouts"].get(message_type, 30)
+
+
+def get_note_ai_title(config: dict[str, Any]) -> bool:
+    """Whether to generate AI titles for notes."""
+    return config.get("note", {}).get("ai_title", True)
+
+
+def get_note_ai_title_model(config: dict[str, Any]) -> str:
+    """Get the Ollama model for AI title generation."""
+    return config.get("note", {}).get("ai_title_model", "gemma3:4b")
